@@ -4,6 +4,7 @@ const cors = require("cors");
 const compression = require("compression");
 const rateLimit = require("express-rate-limit");
 const helmet = require("helmet");
+const path = require("path");
 
 const app = express();
 
@@ -18,7 +19,7 @@ app.use(compression());
 
 // Security: Configure CORS properly (instead of allowing all origins)
 const corsOptions = {
-  origin: process.env.ALLOWED_ORIGIN || ['http://localhost:3000', 'http://localhost:5500', 'http://127.0.0.1:5500', 'file://'],
+  origin: process.env.ALLOWED_ORIGIN || ['http://localhost:5000', 'http://localhost:3000', 'http://localhost:5500', 'http://127.0.0.1:5500', 'http://127.0.0.1:5000', 'file://'],
   credentials: true,
   optionsSuccessStatus: 200,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -26,6 +27,10 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+
+// Serve static files from Frontend directory
+const frontendPath = path.join(__dirname, '..', 'Frontend');
+app.use(express.static(frontendPath));
 
 // Performance: Body parser with limits to prevent DoS
 app.use(express.json({ 
@@ -57,6 +62,20 @@ const apiLimiter = rateLimit({
 
 // Apply rate limiting to all API routes
 app.use('/api/', apiLimiter);
+
+// Request timeout handler (set early)
+const serverTimeout = 30000; // 30 seconds
+app.use((req, res, next) => {
+  req.setTimeout(serverTimeout, () => {
+    if (!res.headersSent) {
+      res.status(408).json({
+        success: false,
+        message: "Request timeout"
+      });
+    }
+  });
+  next();
+});
 
 // Input sanitization helper
 function sanitizeInput(str) {
@@ -196,24 +215,22 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 404 handler for undefined routes
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: "Route not found"
-  });
-});
-
-// Request timeout handler
-const serverTimeout = 30000; // 30 seconds
+// Serve index.html for root and non-API routes (SPA fallback)
+// Also handle 404 for undefined API routes
 app.use((req, res, next) => {
-  req.setTimeout(serverTimeout, () => {
-    res.status(408).json({
+  // Handle undefined API routes with 404
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({
       success: false,
-      message: "Request timeout"
+      message: "Route not found"
     });
+  }
+  // Serve index.html for all other routes
+  res.sendFile(path.join(frontendPath, 'index.html'), (err) => {
+    if (err) {
+      next();
+    }
   });
-  next();
 });
 
 const PORT = process.env.PORT || 5000;
